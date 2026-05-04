@@ -3,6 +3,6 @@ uvicorn
 httpx
 PyPDF2
 numpy
-sentence-transformers
+scikit-learn
 python-dotenv
 python-multipart

@@ -5,7 +5,8 @@ import os
 import httpx
 from PyPDF2 import PdfReader
 import numpy as np
-from sentence_transformers import SentenceTransformer
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 from dotenv import load_dotenv
 
 # ── CONFIG ─────────────────────────────────────────────────────────────────
@@ -15,14 +16,10 @@ API_KEY = os.getenv("API_KEY")
 if not API_KEY:
     raise RuntimeError("API_KEY not found in .env file!")
 
-# ── EMBEDDING MODEL ─────────────────────────────────────────────────────────
-print("Loading embedding model...")
-embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-print("Ready!")
-
 # ── STORAGE ─────────────────────────────────────────────────────────────────
 stored_chunks: list[str] = []
-stored_embeddings: list[list[float]] = []
+vectorizer = TfidfVectorizer()
+stored_matrix = None  # TF-IDF sparse matrix
 
 # ── APP ─────────────────────────────────────────────────────────────────────
 app = FastAPI()
@@ -44,11 +41,6 @@ def chunk_text(text: str, chunk_size=800, overlap=150) -> list[str]:
         chunks.append(text[start:start + chunk_size])
         start += chunk_size - overlap
     return chunks
-
-def cosine_similarity(a, b) -> float:
-    a, b = np.array(a), np.array(b)
-    na, nb = np.linalg.norm(a), np.linalg.norm(b)
-    return float(np.dot(a, b) / (na * nb)) if na and nb else 0.0
 
 def needs_full_document(q: str) -> bool:
     keywords = [
@@ -105,7 +97,7 @@ def home():
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
-    global stored_chunks, stored_embeddings
+    global stored_chunks, vectorizer, stored_matrix
 
     os.makedirs("uploads", exist_ok=True)
     path = os.path.join("uploads", file.filename)
@@ -119,25 +111,27 @@ async def upload_file(file: UploadFile = File(...)):
         return {"error": "Could not extract text. PDF may be image-based."}
 
     stored_chunks = chunk_text(text)
-    stored_embeddings = embedding_model.encode(stored_chunks).tolist()
+
+    # Build TF-IDF matrix from all chunks
+    vectorizer = TfidfVectorizer()
+    stored_matrix = vectorizer.fit_transform(stored_chunks)
 
     return {"message": f"Uploaded! Processed {len(stored_chunks)} chunks."}
 
 
 @app.post("/query")
 async def query(req: QueryRequest):
-    if not stored_embeddings:
+    if stored_matrix is None:
         return {"error": "Upload a document first"}
 
     q = req.q.strip()
 
     if needs_full_document(q):
-        # Send entire document for broad questions like "list all phases"
-        context = "\n\n".join(stored_chunks)
+        context = "\n\n".join(stored_chunks)[:15000]
     else:
-        # RAG: top 6 most relevant chunks for specific questions
-        q_emb = embedding_model.encode([q])[0].tolist()
-        sims = [cosine_similarity(q_emb, e) for e in stored_embeddings]
+        # TF-IDF similarity: top 6 most relevant chunks
+        q_vec = vectorizer.transform([q])
+        sims = cosine_similarity(q_vec, stored_matrix).flatten()
         top = np.argsort(sims)[-6:][::-1]
         context = "\n\n".join(stored_chunks[i] for i in top)[:6000]
 
