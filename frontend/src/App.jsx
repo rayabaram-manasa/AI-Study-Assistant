@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import axios from "axios";
 
-const API = "http://127.0.0.1:8000";
+const API = "https://ai-study-assistant-0vpv.onrender.com";
 
 export default function App() {
   const [file, setFile] = useState(null);
