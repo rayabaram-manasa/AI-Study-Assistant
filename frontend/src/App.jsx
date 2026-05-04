@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import axios from "axios";
 
-const API = "https://ai-study-assistant-0vpv.onrender.com";
+const API = import.meta.env.VITE_API_URL;
 
 export default function App() {
   const [file, setFile] = useState(null);
